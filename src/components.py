@@ -6,6 +6,21 @@ import json
 from typing import List
 import openai
 
+# split a paragraph into sentences using the pattern . after a word in upper case
+def split_paragraph_into_sentences(paragraph: str):
+    sentences = re.split(r'(?<=[.!?]) +', paragraph)
+    return sentences
+
+def preprocess_text(text:str):
+    # remove special characters like [ ] ( ) { } < > / \ | ~ ` ! @ # $ % ^ & * - _ + = , . ? : ; ' "
+    preprocessed = re.sub(r'[\[\](){}<>/\\|~`!@#$%^&*\-_+=,?:;\'\"]', '', text)
+    # remove the character ✔ using regex
+    preprocessed = re.sub(r'✔', '', preprocessed)
+    # remove multiple spaces
+    preprocessed = re.sub(r'\s+', ' ', preprocessed)
+
+    return preprocessed
+
 # generate text using openai library and gpt3
 def generate_summary_gpt3(query: str):
     # Replace YOUR_API_KEY with your OpenAI API key
@@ -13,11 +28,11 @@ def generate_summary_gpt3(query: str):
 
     # Set the model and prompt
     model_engine = "text-davinci-003"
-    prompt = "I'm giving you a description for an amazon product. I want you to write a consise summary of no more than 60 words" \
-             "using original words not present in the text, this is the product description: " + query
+    prompt = f"This is a description for an amazon product: {query}. I need a concise summary of 100 words explainig the main features of the product." \
+             f"You need to use original words not present in the text to describe the product."
 
     # Set the maximum number of tokens to generate in the response
-    max_tokens = 60
+    max_tokens = 100
 
     # Generate a response
     completion = openai.Completion.create(
@@ -38,11 +53,12 @@ class UbuyProduct(BaseModel):
     short_description: str
     description: str
     summary:str
+    bullet_points: List[str]
 
     class Config:
         allow_population_by_field_name = True
 
-    @validator('short_description', 'description')
+    @validator('short_description', 'description', 'name')
     def validate_description(cls, v):
         if v == '':
             raise ValueError(
@@ -54,14 +70,7 @@ class UbuyProduct(BaseModel):
                 'Invalid description'
             )
 
-        # remove special characters like [ ] ( ) { } < > / \ | ~ ` ! @ # $ % ^ & * - _ + = , . ? : ; ' "
-        preprocessed = re.sub(r'[\[\](){}<>/\\|~`!@#$%^&*\-_+=,?:;\'\"]', '', v)
-        # remove the character ✔ using regex
-        preprocessed = re.sub(r'✔', '', preprocessed)
-        # remove multiple spaces
-        preprocessed = re.sub(r'\s+', ' ', preprocessed)
-
-        return preprocessed
+        return preprocess_text(v)
 
 class AmazonProduct(BaseModel):
     name: str
@@ -77,17 +86,11 @@ class AmazonProduct(BaseModel):
             raise ValueError(
                 'Neither description nor summary can be empty'
             )
-        return v
 
-def preprocess_text(text:str):
-    # remove special characters like [ ] ( ) { } < > / \ | ~ ` ! @ # $ % ^ & * - _ + = , . ? : ; ' "
-    preprocessed = re.sub(r'[\[\](){}<>/\\|~`!@#$%^&*\-_+=,?:;\'\"]', '', text)
-    # remove the character ✔ using regex
-    preprocessed = re.sub(r'✔', '', preprocessed)
-    # remove multiple spaces
-    preprocessed = re.sub(r'\s+', ' ', preprocessed)
-
-    return preprocessed
+        if v == '[]':
+            raise ValueError(
+                'Invalid description'
+            )
 
 def run_amazon_data(raw_data_file:str):
     with open(raw_data_file, 'r') as file:
@@ -113,16 +116,18 @@ def run_ubuy_data(raw_data_file:str):
 
     all_ubuy_products = []
 
-    for d in data[:50]:
+    for d in data[:20]:
         d.pop('url')
         d.pop('specifications')
-        d['summary'] = generate_summary_gpt3(query=d['description'])
+        d['summary'] = re.sub(r'\n\n', '', generate_summary_gpt3(query=d['description']))
+        d['bullet_points'] = split_paragraph_into_sentences(d['summary'])
+
         try:
             all_ubuy_products += [UbuyProduct(**d).copy().dict()]
         except ValueError:
             continue
 
-    with open('../data_ubuy/ubuy_descriptions_summary.json', 'w') as file:
+    with open('../data_ubuy/ubuy_descriptions_summary_2.json', 'w') as file:
         json.dump(all_ubuy_products, file, indent=4)
 
 
@@ -159,6 +164,7 @@ def csv_to_json(csv_file:str):
             json.dump(data, file, indent=4)
 
 if __name__ == '__main__':
+    pass
     # csv_to_json(csv_file='../data_ubuy/walmart_sample.csv')
     # run_amazon_data(raw_data_file='../data_ubuy/amazon.json')
     run_ubuy_data(raw_data_file='../data_ubuy/descriptions.json')
