@@ -9,6 +9,8 @@ import os
 from tqdm import tqdm
 
 from components import UbuyProduct, AmazonProduct, UbuySettings, UbuyProductSummary
+from openai.error import RateLimitError
+import backoff
 
 def preprocess_text(text:str):
 
@@ -28,6 +30,7 @@ def split_paragraph_into_sentences(paragraph: str):
     sentences = re.split(r'(?<=[.!?]) +', paragraph)
     return sentences
 
+@backoff.on_exception(backoff.expo, RateLimitError, max_tries=8)
 def generate_summary_gpt3(query: str):
     settings = UbuySettings()
     openai.api_key = settings.openapi_key
