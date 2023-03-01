@@ -1,8 +1,14 @@
-
+import logging
 import re
+
+import numpy as np
 import openai
 import json
-from components import UbuyProduct, AmazonProduct
+import os
+
+from tqdm import tqdm
+
+from components import UbuyProduct, AmazonProduct, UbuySettings, UbuyProductSummary
 
 def preprocess_text(text:str):
 
@@ -10,6 +16,8 @@ def preprocess_text(text:str):
     preprocessed = re.sub(r'[\[\](){}<>/\\|~`!@#$%^&*\-_+=,?:;\u2013\'\"]', '', text.lower())
     # remove the character ✔ using regex
     preprocessed = re.sub(r'✔', '', preprocessed)
+    #remove all special symbols from string
+    preprocessed =  re.sub(r'[^\w\s]', '', preprocessed)
     # remove multiple spaces
     preprocessed = re.sub(r'\s+', ' ', preprocessed)
 
@@ -21,21 +29,21 @@ def split_paragraph_into_sentences(paragraph: str):
     return sentences
 
 def generate_summary_gpt3(query: str):
-    # Replace YOUR_API_KEY with your OpenAI API key
-    openai.api_key = "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"
+    settings = UbuySettings()
+    openai.api_key = settings.openapi_key
 
     # Set the model and prompt
     model_engine = "text-davinci-003"
-    prompt = f"This is a description for an amazon product: {query}. I need a concise summary of 100 words explainig the main features of the product." \
+    prompt = f"This is a description for an amazon product: {query}. I need a concise summary of 60 words explainig the main features of the product." \
              f"You need to use original words not present in the text to describe the product."
 
     # Set the maximum number of tokens to generate in the response
-    max_tokens = 100
+    max_tokens = 70
 
     # Generate a response
     completion = openai.Completion.create(
         engine=model_engine,
-        prompt=prompt,
+        prompt=prompt.split(' ')[:4097],
         max_tokens=max_tokens,
         temperature=0.6,
         top_p=1,
@@ -64,28 +72,62 @@ def run_amazon_data(raw_data_file:str):
     with open('../data_ubuy/amazon_descriptions.json', 'w') as file:
         json.dump(all_amazon_products, file, indent=4)
 
-def run_ubuy_data(raw_data_file:str):
+def run_ubuy_data(raw_data_file:str, output_file:str) -> None:
     with open(raw_data_file, 'r') as file:
         data = json.load(file)
 
     all_ubuy_products = []
-    for d in data[:30]:
+    with tqdm(desc='Generating summary using GPT-3', total=len(data[:20])) as pbar:
+        for idx, d in enumerate(data[:20]):
+            try:
+                d['summary'] = re.sub(r'\n\n', '', generate_summary_gpt3(query=d['description']))
+                d['bullet_points'] = split_paragraph_into_sentences(d['summary'])
+                all_ubuy_products += [UbuyProductSummary(**d).copy().dict()]
+            except ValueError:
+                continue
+
+            pbar.update(1)
+            with open(f'../data_ubuy/{output_file}', 'w') as file:
+                json.dump(all_ubuy_products, file, indent=4)
+            pbar.close()
+
+
+
+def run_ubuy_data_without_summary(raw_data_file:str, output_file:str) -> None:
+    with open(raw_data_file, 'r') as file:
+        data = json.load(file)
+
+    all_ubuy_products = []
+    for d in data:
         d.pop('url')
         d.pop('specifications')
 
         d['name'] = preprocess_text(d['name'])
         d['description'] = preprocess_text(d['description'])
         d['short_description'] = preprocess_text(d['short_description'])
-        d['summary'] = re.sub(r'\n\n', '', generate_summary_gpt3(query=d['description']))
-        d['bullet_points'] = split_paragraph_into_sentences(d['summary'])
 
         try:
             all_ubuy_products += [UbuyProduct(**d).copy().dict()]
         except ValueError:
             continue
 
-    with open('../data_ubuy/ubuy_descriptions_summary_2.json', 'w') as file:
+    with open(f'../data_ubuy/{output_file}', 'w') as file:
         json.dump(all_ubuy_products, file, indent=4)
+
+
+# Join two json files
+def join_files(file1:str, file2:str):
+    with open(file1, 'r') as file:
+        data1 = json.load(file)
+
+    with open(file2, 'r') as file:
+        data2 = json.load(file)
+
+    data1 += data2
+
+    with open('../data_ubuy/data.json', 'w') as file:
+        json.dump(data1, file, indent=4)
+
 
 # Transform a csv file to a json file:
 def csv_to_json(csv_file:str):
