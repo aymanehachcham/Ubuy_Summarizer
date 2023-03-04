@@ -1,5 +1,6 @@
 import logging
 import re
+from time import sleep
 
 import numpy as np
 import openai
@@ -25,23 +26,33 @@ def preprocess_text(text:str):
 
     return preprocessed
 
+# create a function to simulate a call to an api:
+def gpt3_api_call(query: str):
+    sleep(1)
+    print(np.random.randint(0, 100))
+    if np.random.randint(0, 10) % 3 == 0:
+        raise RateLimitError()
+
+    return f'This a simulated summary from gpt3. {query}'
+    # return generate_summary_gpt3(query=quer
+
 # split a paragraph into sentences using the pattern . after a word in upper case
 def split_paragraph_into_sentences(paragraph: str):
     sentences = re.split(r'(?<=[.!?]) +', paragraph)
     return sentences
 
-@backoff.on_exception(backoff.expo, RateLimitError, max_tries=8)
+@backoff.on_exception(backoff.expo, openai.error.RateLimitError, max_time=120)
 def generate_summary_gpt3(query: str):
     settings = UbuySettings()
     openai.api_key = settings.openapi_key
 
     # Set the model and prompt
     model_engine = "text-davinci-003"
-    prompt = f"This is a description for an amazon product: {query}. I need a concise summary of 60 words explainig the main features of the product." \
+    prompt = f"This is a description for an amazon product: {query}. I need a concise summary of 20 words explainig the main features of the product." \
              f"You need to use original words not present in the text to describe the product."
 
     # Set the maximum number of tokens to generate in the response
-    max_tokens = 70
+    max_tokens = 20
 
     # Generate a response
     completion = openai.Completion.create(
@@ -76,6 +87,7 @@ def run_amazon_data(raw_data_file:str):
         json.dump(all_amazon_products, file, indent=4)
 
 def run_ubuy_data(raw_data_file:str, output_file:str) -> None:
+    logging.basicConfig(level=logging.INFO)
     with open(raw_data_file, 'r') as file:
         data = json.load(file)
 
@@ -83,16 +95,21 @@ def run_ubuy_data(raw_data_file:str, output_file:str) -> None:
     with tqdm(desc='Generating summary using GPT-3', total=len(data[:20])) as pbar:
         for idx, d in enumerate(data[:20]):
             try:
-                d['summary'] = re.sub(r'\n\n', '', generate_summary_gpt3(query=d['description']))
+                d['summary'] = re.sub(r'\n\n', '', gpt3_api_call(query=d['description']))
                 d['bullet_points'] = split_paragraph_into_sentences(d['summary'])
                 all_ubuy_products += [UbuyProductSummary(**d).copy().dict()]
             except ValueError:
                 continue
+            except openai.error.OpenAIError:
+                logging.info(f'OpenAIError: Files are saved in {output_file}')
+                with open(f'../data_ubuy/{output_file}', 'w') as file:
+                    json.dump(all_ubuy_products, file, indent=4)
+                exit(1)
 
             pbar.update(1)
-            with open(f'../data_ubuy/{output_file}', 'w') as file:
-                json.dump(all_ubuy_products, file, indent=4)
-            pbar.close()
+        with open(f'../data_ubuy/{output_file}', 'w') as file:
+            json.dump(all_ubuy_products, file, indent=4)
+        pbar.close()
 
 
 

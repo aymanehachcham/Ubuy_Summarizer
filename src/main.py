@@ -8,4 +8,4 @@ if __name__ == '__main__':
     #                               output_file='data_no_summary.json')
     run_ubuy_data(raw_data_file='../data_ubuy/data_no_summary.json',
                   output_file='data_summary.json')
-    # print(generate_summary_gpt3('the welleducated mind a guide to the classical education you never had hardcover november 16 2015'))
+    # print(generate_summary_gpt3('Hello World'))
